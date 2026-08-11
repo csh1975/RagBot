@@ -15,8 +15,24 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  // Vercel 서버리스 함수 타임아웃 설정 (최대 60초, Pro 플랜은 300초)
-  // 필요시 vercel.json에서 별도 설정
+  experimental: {
+    serverActions: {
+      bodySizeLimit: "50mb",
+    },
+  },
+  async headers() {
+    return [
+      {
+        source: "/api/:path*",
+        headers: [
+          { key: "Access-Control-Allow-Credentials", value: "true" },
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Access-Control-Allow-Methods", value: "GET,POST,OPTIONS" },
+          { key: "Access-Control-Allow-Headers", value: "Content-Type,Authorization" },
+        ],
+      },
+    ]
+  },
 };
 
 export default nextConfig;

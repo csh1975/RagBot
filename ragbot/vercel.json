@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "src/app/api/process-document/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/process-document/queue/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/chat/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/search/route.ts": {
+      "maxDuration": 30
+    }
+  }
+}

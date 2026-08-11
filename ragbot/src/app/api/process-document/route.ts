@@ -15,6 +15,9 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { enqueueDocumentProcess } from '@/lib/queue/documentQueue'
 import { processDocumentAsync } from '@/lib/rag/processDocument'
 
+// Vercel 서버리스 함수 실행시간 제한 (업로드 + 큐 등록)
+export const maxDuration = 60
+
 export { processDocumentAsync }
 
 // 파일 크기 제한 (50MB)

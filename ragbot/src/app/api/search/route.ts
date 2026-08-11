@@ -31,6 +31,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { searchChunks } from '@/lib/rag/search'
 
+// Vercel 서버리스 함수 실행시간 제한
+export const maxDuration = 30
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()

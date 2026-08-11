@@ -1,6 +1,6 @@
-# RagBot STEP 4-8 Implementation Plan
+﻿# RagBot STEP 4-8 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Complete the RAG chatbot by adding error_message column, reliable queue-based document processing, LLM provider adapters, chat UI with streaming, and Vercel deployment configuration.
 
@@ -37,7 +37,7 @@
 - Consumes: existing `documents` table schema
 - Produces: `documents.error_message` column (text, nullable)
 
-- [ ] **Step 1: Create migration file**
+- [x] **Step 1: Create migration file**
 
 ```sql
 -- 007_add_error_message_column.sql
@@ -50,14 +50,14 @@ add column if not exists error_message text;
 comment on column public.documents.error_message is '문서 처리 실패 시 에러 메시지 저장';
 ```
 
-- [ ] **Step 2: Apply migration locally**
+- [x] **Step 2: Apply migration locally**
 
 ```bash
 cd ragbot && npx supabase db reset
 ```
 Expected: Migration runs successfully, column added
 
-- [ ] **Step 3: Update process-document route to use error_message**
+- [x] **Step 3: Update process-document route to use error_message**
 
 ```typescript
 // In catch block of processDocumentAsync (route.ts:277-287)
@@ -71,7 +71,7 @@ await supabase
   .eq('id', documentId)
 ```
 
-- [ ] **Step 4: Verify build passes**
+- [x] **Step 4: Verify build passes**
 
 ```bash
 cd ragbot && npm run build
@@ -92,13 +92,13 @@ Expected: TypeScript compiles without errors
 - Consumes: `processDocumentAsync` function, documentId, fileBuffer, mimeType
 - Produces: Queue enqueue function, queue consumer API route
 
-- [ ] **Step 1: Install dependencies**
+- [x] **Step 1: Install dependencies**
 
 ```bash
 cd ragbot && npm install @upstash/redis @upstash/qstash
 ```
 
-- [ ] **Step 2: Create queue utility**
+- [x] **Step 2: Create queue utility**
 
 ```typescript
 // src/lib/queue/documentQueue.ts
@@ -143,7 +143,7 @@ export async function processQueueJob(job: DocumentProcessJob): Promise<void> {
 }
 ```
 
-- [ ] **Step 3: Create queue consumer API route**
+- [x] **Step 3: Create queue consumer API route**
 
 ```typescript
 // src/app/api/process-document/queue/route.ts
@@ -174,7 +174,7 @@ export async function POST(request: NextRequest) {
 }
 ```
 
-- [ ] **Step 4: Modify process-document route to enqueue**
+- [x] **Step 4: Modify process-document route to enqueue**
 
 ```typescript
 // In route.ts POST handler, replace fire-and-forget (line 150)
@@ -193,7 +193,7 @@ await enqueueDocumentProcess({
 // Remove processDocumentAsync call and import
 ```
 
-- [ ] **Step 5: Add QStash env vars to .env.local.example**
+- [x] **Step 5: Add QStash env vars to .env.local.example**
 
 ```
 # Upstash QStash (문서 처리 큐용)
@@ -203,7 +203,7 @@ QSTASH_NEXT_SIGNING_KEY=your_next_signing_key
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-- [ ] **Step 6: Verify build and local queue test**
+- [x] **Step 6: Verify build and local queue test**
 
 ```bash
 cd ragbot && npm run build
@@ -223,7 +223,7 @@ Expected: Build passes
 - Consumes: `createEmbedding`, Supabase client
 - Produces: `searchChunks(query, options)` function
 
-- [ ] **Step 1: Create search module**
+- [x] **Step 1: Create search module**
 
 ```typescript
 // src/lib/rag/search.ts
@@ -290,7 +290,7 @@ export async function searchChunks(
 }
 ```
 
-- [ ] **Step 2: Update search API route**
+- [x] **Step 2: Update search API route**
 
 ```typescript
 // src/app/api/search/route.ts
@@ -300,7 +300,7 @@ import { searchChunks } from '@/lib/rag/search'
 const results = await searchChunks(query.trim(), { matchCount, category })
 ```
 
-- [ ] **Step 3: Update chat API route**
+- [x] **Step 3: Update chat API route**
 
 ```typescript
 // src/app/api/chat/route.ts
@@ -313,7 +313,7 @@ const searchResults = await searchChunks(lastUserMessage.content, {
 })
 ```
 
-- [ ] **Step 4: Verify build and search API works**
+- [x] **Step 4: Verify build and search API works**
 
 ```bash
 cd ragbot && npm run build
@@ -334,7 +334,7 @@ Expected: Build passes, search API returns same results
 - Consumes: `LLMClient` interface from index.ts
 - Produces: Three adapter implementations, factory returns correct one
 
-- [ ] **Step 1: Implement OpenAI adapter**
+- [x] **Step 1: Implement OpenAI adapter**
 
 ```typescript
 // src/lib/llm/openai.ts
@@ -366,7 +366,7 @@ export const openaiAdapter: LLMClient = {
 }
 ```
 
-- [ ] **Step 2: Implement Anthropic adapter**
+- [x] **Step 2: Implement Anthropic adapter**
 
 ```typescript
 // src/lib/llm/anthropic.ts
@@ -400,7 +400,7 @@ export const anthropicAdapter: LLMClient = {
 }
 ```
 
-- [ ] **Step 3: Implement Custom adapter (OpenAI-compatible)**
+- [x] **Step 3: Implement Custom adapter (OpenAI-compatible)**
 
 ```typescript
 // src/lib/llm/custom.ts
@@ -432,7 +432,7 @@ export const customAdapter: LLMClient = {
 }
 ```
 
-- [ ] **Step 4: Update factory**
+- [x] **Step 4: Update factory**
 
 ```typescript
 // src/lib/llm/index.ts
@@ -466,13 +466,13 @@ export function getLLMClient(): LLMClient {
 }
 ```
 
-- [ ] **Step 5: Install Anthropic SDK**
+- [x] **Step 5: Install Anthropic SDK**
 
 ```bash
 cd ragbot && npm install @anthropic-ai/sdk
 ```
 
-- [ ] **Step 6: Update .env.local.example**
+- [x] **Step 6: Update .env.local.example**
 
 ```
 # LLM 프로바이더 선택
@@ -482,7 +482,7 @@ LLM_MODEL=gpt-4o
 # LLM_BASE_URL=  # custom 프로바이더/로컬 LLM 사용 시에만 설정
 ```
 
-- [ ] **Step 7: Verify build passes**
+- [x] **Step 7: Verify build passes**
 
 ```bash
 cd ragbot && npm run build
@@ -505,13 +505,13 @@ Expected: Build passes, no TypeScript errors
 - Consumes: `/api/chat` streaming endpoint, `useChat` from `ai/react`
 - Produces: Full chat page with streaming, citations, category filter
 
-- [ ] **Step 1: Install Vercel AI SDK**
+- [x] **Step 1: Install Vercel AI SDK**
 
 ```bash
 cd ragbot && npm install ai @ai-sdk/react
 ```
 
-- [ ] **Step 2: Create ChatInterface component**
+- [x] **Step 2: Create ChatInterface component**
 
 ```tsx
 // src/components/chat/ChatInterface.tsx
@@ -581,7 +581,7 @@ export function ChatInterface() {
 }
 ```
 
-- [ ] **Step 3: Create MessageList component**
+- [x] **Step 3: Create MessageList component**
 
 ```tsx
 // src/components/chat/MessageList.tsx
@@ -627,7 +627,7 @@ export function MessageList({ messages, isLoading, sources }: MessageListProps) 
 }
 ```
 
-- [ ] **Step 4: Create MessageInput component**
+- [x] **Step 4: Create MessageInput component**
 
 ```tsx
 // src/components/chat/MessageInput.tsx
@@ -676,7 +676,7 @@ export function MessageInput({ input, handleInputChange, handleSubmit, isLoading
 }
 ```
 
-- [ ] **Step 5: Create SourceCitations component**
+- [x] **Step 5: Create SourceCitations component**
 
 ```tsx
 // src/components/chat/SourceCitations.tsx
@@ -733,7 +733,7 @@ export function SourceCitations({ sources, onClose }: SourceCitationsProps) {
 }
 ```
 
-- [ ] **Step 6: Create chat page**
+- [x] **Step 6: Create chat page**
 
 ```tsx
 // src/app/chat/page.tsx
@@ -772,7 +772,7 @@ export default async function ChatPage() {
 }
 ```
 
-- [ ] **Step 7: Update ChatInterface to accept categories prop**
+- [x] **Step 7: Update ChatInterface to accept categories prop**
 
 ```tsx
 // In ChatInterface.tsx
@@ -785,7 +785,7 @@ export function ChatInterface({ initialCategories = [] }: ChatInterfaceProps) {
 }
 ```
 
-- [ ] **Step 8: Verify build and page renders**
+- [x] **Step 8: Verify build and page renders**
 
 ```bash
 cd ragbot && npm run build
@@ -806,7 +806,7 @@ Expected: Build passes, `/chat` page accessible after login
 - Consumes: All environment variables, API routes
 - Produces: Vercel deployment config, documentation
 
-- [ ] **Step 1: Create vercel.json**
+- [x] **Step 1: Create vercel.json**
 
 ```json
 {
@@ -844,7 +844,7 @@ Expected: Build passes, `/chat` page accessible after login
 }
 ```
 
-- [ ] **Step 2: Update next.config.ts for maxDuration**
+- [x] **Step 2: Update next.config.ts for maxDuration**
 
 ```typescript
 // next.config.ts
@@ -874,7 +874,7 @@ const nextConfig: NextConfig = {
 export default nextConfig
 ```
 
-- [ ] **Step 3: Complete .env.local.example**
+- [x] **Step 3: Complete .env.local.example**
 
 ```
 # ===========================================
@@ -912,7 +912,7 @@ NEXT_PUBLIC_APP_URL=https://your-app.vercel.app
 NODE_ENV=production
 ```
 
-- [ ] **Step 4: Create comprehensive README.md**
+- [x] **Step 4: Create comprehensive README.md**
 
 ```markdown
 # RagBot - 대전교육연수원 문서 기반 RAG 챗봇
@@ -1085,7 +1085,7 @@ vercel --prod
 Internal use only - 대전교육연수원
 ```
 
-- [ ] **Step 5: Verify build and deploy test**
+- [x] **Step 5: Verify build and deploy test**
 
 ```bash
 cd ragbot && npm run build
@@ -1100,7 +1100,7 @@ Expected: Build passes, vercel.json valid
 - All modified/created files
 - Run full test suite
 
-- [ ] **Step 1: Run lint and typecheck**
+- [x] **Step 1: Run lint and typecheck**
 
 ```bash
 cd ragbot && npm run lint
@@ -1189,3 +1189,4 @@ git commit -m "feat: complete STEP 4-8 implementation
 **2. Inline Execution** - Execute tasks in this session using executing-plans, batch execution with checkpoints
 
 **Which approach?**
+

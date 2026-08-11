@@ -19,6 +19,9 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
+
+// Vercel 서버리스 함수 실행시간 제한 (LLM 스트리밍 포함)
+export const maxDuration = 60
 import { createClient } from '@/lib/supabase/server'
 import { searchChunks } from '@/lib/rag/search'
 import { getLLMClient, type LLMClient } from '@/lib/llm'
@@ -96,7 +99,7 @@ export async function POST(request: NextRequest) {
 
     // 요청 파싱
     const body = (await request.json()) as ChatRequestBody
-    const { messages, category, matchCount } = body
+    const { messages, documentIds, category, matchCount } = body
 
     if (!Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json(
@@ -120,6 +123,7 @@ export async function POST(request: NextRequest) {
     const searchResults = await searchChunks(extractMessageText(lastUserMessage), {
       matchCount: Math.min(typeof matchCount === 'number' ? matchCount : DEFAULT_MATCH_COUNT, MAX_MATCH_COUNT),
       category: typeof category === 'string' ? category : undefined,
+      documentIds: Array.isArray(documentIds) ? documentIds.filter((id): id is string => typeof id === 'string') : undefined,
     })
 
     // 2. 컨텍스트 구성
@@ -164,11 +168,13 @@ export async function POST(request: NextRequest) {
             mediaType: 'text/plain',
             title: row.documentTitle,
             providerMetadata: {
-              chunkId: row.chunkId,
-              documentId: row.documentId,
-              pageNumber: row.pageNumber ?? null,
-              similarity: row.similarity,
-              preview: row.content.slice(0, 200) + (row.content.length > 200 ? '...' : ''),
+              ragbot: {
+                chunkId: row.chunkId,
+                documentId: row.documentId,
+                pageNumber: row.pageNumber ?? null,
+                similarity: row.similarity,
+                preview: row.content.slice(0, 200) + (row.content.length > 200 ? '...' : ''),
+              },
             },
           })
         })
