@@ -22,15 +22,14 @@
  *         documentTitle: string,
  *         similarity: number
  *       }
- *     ],
- *     queryEmbedding: number[]
+ *     }
  *   }
  * }
  */
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { createEmbedding } from '@/lib/rag/embeddings'
+import { searchChunks } from '@/lib/rag/search'
 
 export async function POST(request: NextRequest) {
   try {
@@ -56,44 +55,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 쿼리 임베딩 생성
-    const queryEmbedding = await createEmbedding(query.trim())
-
-    // 유사도 검색 함수 호출
-    const { data: results, error } = await supabase.rpc('match_document_chunks', {
-      query_embedding: queryEmbedding,
-      match_count: Math.min(matchCount, 50), // 최대 50개 제한
-      category_filter: category || null,
-    })
-
-    if (error) {
-      console.error('[Search] 검색 실패:', error)
-      return NextResponse.json(
-        { success: false, error: '검색 중 오류가 발생했습니다' },
-        { status: 500 }
-      )
-    }
-
-    // 결과 포맷팅
-    const formattedResults = (results || []).map((row: {
-      chunk_id: string
-      content: string
-      metadata: Record<string, unknown>
-      document_id: string
-      similarity: number
-    }) => ({
-      chunkId: row.chunk_id,
-      content: row.content,
-      metadata: row.metadata,
-      documentId: row.document_id,
-      similarity: Math.round(row.similarity * 10000) / 10000, // 소수점 4자리
-    }))
+    // 유사도 검색 (임베딩 생성 포함)
+    const results = await searchChunks(query.trim(), { matchCount, category })
 
     return NextResponse.json({
       success: true,
       data: {
-        results: formattedResults,
-        queryEmbedding: queryEmbedding.slice(0, 5), // 디버깅용 앞 5개만
+        results,
       }
     })
 

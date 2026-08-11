@@ -15,7 +15,7 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { createEmbedding } from '@/lib/rag/embeddings'
+import { searchChunks } from '@/lib/rag/search'
 import { getLLMClient } from '@/lib/llm'
 
 const DEFAULT_MATCH_COUNT = 5
@@ -65,46 +65,19 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 1. 쿼리 임베딩 생성
-    const queryEmbedding = await createEmbedding(lastUserMessage.content)
-
-    // 2. 유사도 검색 (문서 ID 필터링은 현재 RPC에서 미지원, 향후 확장 가능)
-    const { data: searchResults, error: searchError } = await supabase.rpc('match_document_chunks', {
-      query_embedding: queryEmbedding,
-      match_count: Math.min(matchCount, MAX_MATCH_COUNT),
-      category_filter: category || null,
+    // 1. 유사도 검색 (임베딩 생성 + 문서 제목 조회 포함)
+    const searchResults = await searchChunks(lastUserMessage.content, {
+      matchCount: Math.min(matchCount, MAX_MATCH_COUNT),
+      category,
     })
 
-    if (searchError) {
-      console.error('[Chat] 검색 실패:', searchError)
-      return NextResponse.json(
-        { success: false, error: '검색 중 오류가 발생했습니다' },
-        { status: 500 }
-      )
-    }
-
-    // 3. 컨텍스트 구성
-    const contextChunks = (searchResults || []).map((row: {
-      chunk_id: string
-      content: string
-      metadata: Record<string, unknown>
-      document_id: string
-      similarity: number
-    }, index: number) => {
-      const pageNum = row.metadata?.pageNumber ? ` (p.${row.metadata.pageNumber})` : ''
+    // 2. 컨텍스트 구성
+    const contextChunks = searchResults.map((row, index: number) => {
+      const pageNum = row.pageNumber ? ` (p.${row.pageNumber})` : ''
       return `[${index + 1}] ${row.content}${pageNum}`
     }).join('\n\n')
 
-    // 문서 제목 조회 (출처 표시용)
-    const docIds = [...new Set((searchResults || []).map((r: { document_id: string }) => r.document_id))]
-    const { data: documents } = await supabase
-      .from('documents')
-      .select('id, title')
-      .in('id', docIds)
-
-    const docTitleMap = new Map(documents?.map(d => [d.id, d.title]) || [])
-
-    // 4. LLM용 메시지 구성
+    // 3. LLM용 메시지 구성
     const contextMessage = contextChunks
       ? `다음은 관련 문서 내용입니다:\n\n${contextChunks}\n\n위 문서를 참고하여 질문에 답변하세요.`
       : '관련 문서를 찾을 수 없습니다. 제공된 문서에서 확인할 수 없다고 답변하세요.'
@@ -115,7 +88,7 @@ export async function POST(request: NextRequest) {
       ...messages.slice(-10).map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
     ]
 
-    // 5. LLM 스트리밍 응답
+    // 4. LLM 스트리밍 응답
     let llmClient
     try {
       llmClient = getLLMClient()
@@ -126,7 +99,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const model = process.env.LLM_MODEL || 'gpt-4o'
+    const model = process.env.LLM_MODEL
 
     // 스트리밍 응답 생성
     const encoder = new TextEncoder()
@@ -140,18 +113,12 @@ export async function POST(request: NextRequest) {
           })
 
           // 출처 정보 먼저 전송
-          const sources = (searchResults || []).map((row: {
-            chunk_id: string
-            content: string
-            metadata: Record<string, unknown>
-            document_id: string
-            similarity: number
-          }, index: number) => ({
-            chunkId: row.chunk_id,
-            documentId: row.document_id,
-            documentTitle: docTitleMap.get(row.document_id) || '알 수 없음',
-            pageNumber: row.metadata?.pageNumber,
-            similarity: Math.round(row.similarity * 10000) / 10000,
+          const sources = searchResults.map(row => ({
+            chunkId: row.chunkId,
+            documentId: row.documentId,
+            documentTitle: row.documentTitle,
+            pageNumber: row.pageNumber,
+            similarity: row.similarity,
             preview: row.content.slice(0, 200) + (row.content.length > 200 ? '...' : ''),
           }))
 

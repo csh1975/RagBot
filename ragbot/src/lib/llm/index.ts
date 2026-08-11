@@ -1,23 +1,27 @@
-﻿export interface LLMClient {
+﻿import { openaiAdapter } from './openai'
+import { anthropicAdapter } from './anthropic'
+import { customAdapter } from './custom'
+
+export interface LLMClient {
   streamChat(params: {
     systemPrompt: string
     messages: { role: 'user' | 'assistant' | 'system'; content: string }[]
-    model: string
+    model?: string
   }): AsyncIterable<string>
 }
 
 export type LLMProvider = 'anthropic' | 'openai' | 'custom'
 
 export function getLLMClient(): LLMClient {
-  const provider = process.env.LLM_PROVIDER as LLMProvider
+  const provider = (process.env.LLM_PROVIDER || 'openai') as LLMProvider
 
   switch (provider) {
     case 'anthropic':
-      throw new Error('Anthropic adapter not implemented yet (STEP 7)')
+      return anthropicAdapter
     case 'openai':
-      throw new Error('OpenAI adapter not implemented yet (STEP 7)')
+      return openaiAdapter
     case 'custom':
-      throw new Error('Custom adapter not implemented yet (STEP 7)')
+      return customAdapter
     default:
       throw new Error(`Unknown LLM provider: ${provider}`)
   }
