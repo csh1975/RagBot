@@ -25,9 +25,31 @@ export const maxDuration = 60
 import { createClient } from '@/lib/supabase/server'
 import { searchChunks } from '@/lib/rag/search'
 import { getLLMClient, type LLMClient } from '@/lib/llm'
+import { cookies } from 'next/headers'
 
 const DEFAULT_MATCH_COUNT = 5
 const MAX_MATCH_COUNT = 20
+
+// JWT 쿠키에서 user_id 추출 (getUser() 네트워크 실패 시 fallback)
+async function getUserIdFromAuthCookie(): Promise<string | null> {
+  const cookieStore = await cookies()
+  const authCookie = cookieStore.get('sb-olligknivxmnwecmyslx-auth-token')
+  if (!authCookie) return null
+  
+  try {
+    const value = authCookie.value
+    const base64Part = value.replace('base64-', '')
+    const decoded = JSON.parse(Buffer.from(base64Part, 'base64').toString())
+    const accessToken = decoded.access_token
+    if (!accessToken) return null
+    
+    const payload = accessToken.split('.')[1]
+    const payloadJson = JSON.parse(Buffer.from(payload, 'base64').toString())
+    return payloadJson.sub || null
+  } catch {
+    return null
+  }
+}
 
 // 시스템 프롬프트 (RAG용)
 const SYSTEM_PROMPT = `당신은 대전교육연수원 사내 문서 기반 RAG 챗봇입니다.
@@ -88,9 +110,16 @@ export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
 
-    // 인증 확인
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
+    // 인증 확인 (getUser() 실패 시 JWT 쿠키 fallback)
+    const { data: { user }, error } = await supabase.auth.getUser()
+    
+    let effectiveUser = user
+    if (!effectiveUser) {
+      const userId = await getUserIdFromAuthCookie()
+      if (userId) effectiveUser = { id: userId } as any
+    }
+    
+    if (!effectiveUser) {
       return NextResponse.json(
         { success: false, error: '인증이 필요합니다' },
         { status: 401 }
@@ -145,17 +174,25 @@ export async function POST(request: NextRequest) {
 
     // 4. LLM 클라이언트 초기화 (실패 시 500)
     let llmClient: LLMClient
+    let model = process.env.LLM_MODEL || 'gemini-2.5-flash'
     try {
       llmClient = getLLMClient()
+      console.log('[Chat] LLM client initialized, provider:', process.env.LLM_PROVIDER)
+      // 설정에서 모델 읽기 (저장된 설정 사용)
+      const { getSetting } = await import('@/lib/config/settings')
+      const configuredModel = await getSetting('llm_model')
+      if (configuredModel) {
+        model = configuredModel
+        console.log('[Chat] Using configured model:', model)
+      }
     } catch (error) {
       console.error('[Chat] LLM 클라이언트 초기화 실패:', error)
       return NextResponse.json(
-        { success: false, error: 'LLM 클라이언트 초기화 실패' },
+        { success: false, error: 'LLM 클라이언트 초기화 실패: ' + (error instanceof Error ? error.message : String(error)) },
         { status: 500 }
       )
     }
 
-    const model = process.env.LLM_MODEL
 
     // 5. UI 메시지 스트림 구성 (출처 먼저, 그 다음 텍스트)
     const stream = createUIMessageStream({
@@ -209,7 +246,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('[Chat] 예외 발생:', error)
     return NextResponse.json(
-      { success: false, error: '서버 오류가 발생했습니다' },
+      { success: false, error: '서버 오류: ' + (error instanceof Error ? error.message : String(error)) },
       { status: 500 }
     )
   }
