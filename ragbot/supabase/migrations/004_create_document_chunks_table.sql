@@ -7,7 +7,7 @@ create table public.document_chunks (
   id uuid primary key default gen_random_uuid(),
   document_id uuid not null references public.documents(id) on delete cascade,
   content text not null,
-  embedding vector(1536),                    -- OpenAI text-embedding-3-large 차원
+  embedding vector(3072),                    -- Google Gemini text-embedding-001 차원 (3072)
   chunk_index int not null,                  -- 문서 내 순서
   metadata jsonb default '{}',               -- 페이지 번호, 섹션 등
   created_at timestamp with time zone default timezone('utc'::text, now()) not null

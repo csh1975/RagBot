@@ -1,12 +1,12 @@
 -- 005_create_match_function.sql
 -- pgvector 유사도 검색 함수: match_document_chunks
--- query_embedding: 검색할 임베딩 벡터 (1536차원)
+-- query_embedding: 검색할 임베딩 벡터 (3072차원 - gemini-embedding-001)
 -- match_count: 반환할 최대 결과 수
 -- category_filter: 선택적 카테고리 필터 (null이면 전체)
 -- 반환: chunk_id, content, metadata, document_id, similarity (0~1, 높을수록 유사)
 
 create or replace function public.match_document_chunks(
-  query_embedding vector(1536),
+  query_embedding vector(3072),
   match_count int default 10,
   category_filter text default null
 )
