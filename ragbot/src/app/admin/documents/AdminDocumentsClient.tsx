@@ -63,10 +63,10 @@ export function AdminDocumentsPage() {
   const supabase = createClient()
 
   // 토스트 표시
-  const showToast = (message: string, type: 'success' | 'error') => {
+  const showToast = useCallback((message: string, type: 'success' | 'error') => {
     setToast({ message, type })
     setTimeout(() => setToast(null), 3000)
-  }
+  }, [])
 
   // 문서 목록 조회
   const fetchDocuments = useCallback(async () => {
@@ -278,7 +278,7 @@ export function AdminDocumentsPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <h1 className="text-xl font-bold text-gray-900 dark:text-white">문서 관리</h1>
-            <nav className="flex items-center gap-4">
+<nav className="flex items-center gap-4">
               <a
                 href="/admin"
                 className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors text-sm"
@@ -286,10 +286,16 @@ export function AdminDocumentsPage() {
                 대시보드
               </a>
               <a
+                href="/admin/settings"
+                className="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors text-sm"
+              >
+                설정
+              </a>
+              <a
                 href="/chat"
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm"
               >
-                챗봇 테스트
+                ���� 테스트
               </a>
             </nav>
           </div>

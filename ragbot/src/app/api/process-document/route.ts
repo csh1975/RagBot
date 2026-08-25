@@ -11,7 +11,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
+import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { enqueueDocumentProcess } from '@/lib/queue/documentQueue'
 import { processDocumentAsync } from '@/lib/rag/processDocument'
 
@@ -34,18 +34,11 @@ function generateId(): string {
   return crypto.randomUUID()
 }
 
-interface ProcessDocumentRequest {
-  file: File
-  title: string
-  category?: string
-}
-
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServiceClient()
-    
-    // 인증 확인
-    const { data: { user } } = await supabase.auth.getUser()
+    // 인증 확인 (쿠키 기반 클라이언트)
+    const userClient = await createClient()
+    const { data: { user } } = await userClient.auth.getUser()
     if (!user) {
       return NextResponse.json(
         { success: false, error: '인증이 필요합니다' },
@@ -54,7 +47,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 관리자 권한 확인
-    const { data: profile } = await supabase
+    const { data: profile } = await userClient
       .from('profiles')
       .select('role')
       .eq('id', user.id)
@@ -66,6 +59,8 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       )
     }
+
+    const supabase = createServiceClient()
 
     // FormData 파싱
     const formData = await request.formData()
@@ -121,7 +116,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 2. 문서 메타데이터 DB 저장
+    // 2. 문서 메타데이터 DB 저장 (status: pending — 파서 파이프라인이 processing으로 변경)
     const { error: docError } = await supabase
       .from('documents')
       .insert({
@@ -130,7 +125,7 @@ export async function POST(request: NextRequest) {
         file_path: filePath,
         category: category || null,
         uploaded_by: user.id,
-        status: 'processing',
+        status: 'pending',
       })
 
     if (docError) {
@@ -143,50 +138,77 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 3. 큐에 문서 처리 작업 등록
+    // 3. 문서 처리 큐 등록
+    //    - 프로덕션(Vercel): Upstash QStash 큐로 처리 → 서버리스 함수 제한과 무관하게
+    //      파싱~임베딩까지 오래 걸리는 작업을 안정적으로 수행 (재시도 3회)
+    //    - 로컬 개발: QStash dev 모드가 로컬에서 동작하지 않으므로 같은 요청 안에서 직접 처리
     try {
-      await enqueueDocumentProcess({
-        documentId,
-        filePath,
-        mimeType,
-        fileName: file.name,
-      })
-    } catch (enqueueError) {
-      console.error('[Process Document] 큐 등록 실패:', enqueueError)
+      if (isQueueConfigured()) {
+        await enqueueDocumentProcess({
+          documentId,
+          filePath,
+          mimeType,
+          fileName: file.name,
+        })
+      } else {
+        await processDocumentAsync(documentId, fileBuffer, file.name, mimeType, supabase)
+      }
+} catch (enqueueError) {
+      console.error('[Process Document] 큐/처리 등록 실패:', enqueueError)
+      console.error('[Process Document] 큐/처리 등록 실패 stack:', enqueueError instanceof Error ? enqueueError.stack : 'No stack')
       // 큐 등록 실패 시 문서 상태를 failed로 표시하고 Storage 파일 정리
+      // error_message 컬럼이 없을 수 있어 상태 업데이트와 별도 처리
       const errorMessage = enqueueError instanceof Error ? enqueueError.message : 'Unknown error'
       await supabase
         .from('documents')
-        .update({
-          status: 'failed',
-          error_message: `큐 등록 실패: ${errorMessage}`,
-          updated_at: new Date().toISOString(),
-        })
+        .update({ status: 'failed', updated_at: new Date().toISOString() })
         .eq('id', documentId)
+      try {
+        await supabase
+          .from('documents')
+          .update({ error_message: `큐/처리 등록 실패: ${errorMessage}` })
+          .eq('id', documentId)
+      } catch (colError) {
+        console.warn('[Process Document] error_message 업데이트 실패 (컬럼 미적용 가능):', colError)
+      }
       await supabase.storage.from('documents').remove([filePath])
       return NextResponse.json(
-        { success: false, error: '문서 처리 큐 등록에 실패했습니다' },
+        { success: false, error: '문서 처리 큐/처리 등록에 실패했습니다: ' + errorMessage },
         { status: 500 }
       )
     }
 
+    const isQueued = isQueueConfigured()
     return NextResponse.json({
       success: true,
       data: {
         documentId,
         title,
-        status: 'processing',
-        message: '문서 처리가 큐에 등록되었습니다. 잠시 후 완료됩니다.'
+        status: isQueued ? 'processing' : 'completed',
+        message: isQueued
+          ? '문서 처리가 큐에 등록되었습니다. 잠시 후 완료됩니다.'
+          : '문서 처리가 완료되었습니다.',
       }
     })
 
   } catch (error) {
     console.error('[Process Document] 예외 발생:', error)
     return NextResponse.json(
-      { success: false, error: '서버 오류가 발생했습니다' },
+      { success: false, error: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     )
   }
+}
+
+/**
+ * QStash 큐 사용 가능 여부
+ * - 프로덕션: QSTASH_TOKEN이 설정되어 있고 dev 모드가 아닌 경우 큐 사용
+ * - 로컬 개발: QSTASH_DEV=true 또는 토큰 미설정 시 직접 처리 (서버리스 제한과 무관)
+ */
+function isQueueConfigured(): boolean {
+  const token = process.env.QSTASH_TOKEN
+  const devMode = process.env.QSTASH_DEV === 'true'
+  return Boolean(token && !devMode)
 }
 
 /**
