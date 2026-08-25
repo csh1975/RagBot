@@ -1,21 +1,25 @@
 /**
- * OpenAI 임베딩 생성 유틸리티
- * - 모델: text-embedding-3-large (1536차원)
+ * Google Gemini 임베딩 생성 유틸리티 (REST API 직접 호출)
+ * - 모델: gemini-embedding-001 (3072차원)
  * - 재시도 로직: exponential backoff
  * - 배치 처리 지원
+ * - 일부 배치 실패 시 전체를 실패 처리하지 않고 실패 인덱스만 반환 (부분 실패 허용)
  */
 
-import OpenAI from 'openai'
+import { getSetting } from '@/lib/config/settings'
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
-
-const EMBEDDING_MODEL = 'text-embedding-3-large'
-const EMBEDDING_DIMENSION = 1536
-const MAX_BATCH_SIZE = 100  // OpenAI 권장 최대 배치 크기
+const EMBEDDING_MODEL = 'gemini-embedding-001'
+const EMBEDDING_DIMENSION = 3072
+const MAX_BATCH_SIZE = 100
 const MAX_RETRIES = 3
 const BASE_DELAY_MS = 1000
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta'
+
+interface EmbeddingResponse {
+  embedding: {
+    values: number[]
+  }
+}
 
 export interface EmbeddingResult {
   embedding: number[]
@@ -26,34 +30,65 @@ export interface EmbeddingResult {
 export interface BatchEmbeddingResult {
   embeddings: EmbeddingResult[]
   totalTokens: number
+  failedIndices: number[]
 }
 
-/**
- * 지수 백오프로 재시도하며 임베딩 생성
- */
+async function getApiKey(): Promise<string> {
+  const apiKey = await getSetting('gemini_api_key') || process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY가 설정되지 않았습니다 (관리자 설정 또는 환경변수 확인)')
+  }
+  console.log('[Embedding] Using API key:', apiKey.slice(0, 10) + '...')
+  return apiKey
+}
+
 async function createEmbeddingWithRetry(
   input: string | string[],
   attempt: number = 1
-): Promise<OpenAI.Embeddings.Embedding[]> {
+): Promise<{ data: number[][]; totalTokens: number }> {
   try {
-    const response = await openai.embeddings.create({
-      model: EMBEDDING_MODEL,
-      input,
-      encoding_format: 'float',
-    })
-    return response.data
+    const apiKey = await getApiKey()
+    const texts = Array.isArray(input) ? input : [input]
+    const embeddings: number[][] = []
+    let totalTokens = 0
+
+    for (const text of texts) {
+      const response = await fetch(
+        `${GEMINI_API_BASE}/models/${EMBEDDING_MODEL}:embedContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content: { parts: [{ text }] },
+            taskType: 'RETRIEVAL_DOCUMENT',
+          }),
+        }
+      )
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'no response body')
+        throw new Error(`Gemini 임베딩 API 오류 (${response.status}): ${errorText}`)
+      }
+
+      const result: EmbeddingResponse = await response.json()
+      const embeddingLen = result.embedding.values.length
+      embeddings.push(result.embedding.values)
+      totalTokens += Math.ceil(text.length / 4)
+    }
+
+    return { data: embeddings, totalTokens }
   } catch (error: unknown) {
-    const isRateLimit = error instanceof OpenAI.APIError && error.status === 429
-    const isServerError = error instanceof OpenAI.APIError && error.status && error.status >= 500
+    const isRateLimit = error instanceof Error && error.message.includes('429')
+    const isServerError = error instanceof Error && (error.message.includes('500') || error.message.includes('503'))
     const isNetworkError = error instanceof Error && (
-      error.name === 'ECONNRESET' || 
+      error.name === 'ECONNRESET' ||
       error.name === 'ETIMEDOUT' ||
-      error.message.includes('network')
+      error.message.includes('network') ||
+      error.message.includes('fetch')
     )
 
     if (attempt < MAX_RETRIES && (isRateLimit || isServerError || isNetworkError)) {
       const delay = BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 1000
-      console.log(`[Embedding] 재시도 ${attempt}/${MAX_RETRIES} - ${delay.toFixed(0)}ms 후 재시도`)
       await new Promise(resolve => setTimeout(resolve, delay))
       return createEmbeddingWithRetry(input, attempt + 1)
     }
@@ -62,36 +97,28 @@ async function createEmbeddingWithRetry(
   }
 }
 
-/**
- * 단일 텍스트 임베딩 생성
- */
 export async function createEmbedding(text: string): Promise<number[]> {
   if (!text || text.trim().length === 0) {
-    throw new Error('빈 텍스트는 임베딩할 수 없습니다')
+    throw new Error('빈 �����스트는 임베딩할 수 없습니다')
   }
 
-  // 텍스트 길이 제한 (8191 tokens ≈ 32000자)
   const truncatedText = text.slice(0, 30000)
-
-  const embeddings = await createEmbeddingWithRetry(truncatedText)
-  return embeddings[0].embedding
+  const { data } = await createEmbeddingWithRetry(truncatedText)
+  return data[0]
 }
 
-/**
- * 배치 임베딩 생성 (최대 100개씩 분할 처리)
- */
 export async function createBatchEmbeddings(
   texts: string[],
   onProgress?: (completed: number, total: number) => void
 ): Promise<BatchEmbeddingResult> {
   if (texts.length === 0) {
-    return { embeddings: [], totalTokens: 0 }
+    return { embeddings: [], totalTokens: 0, failedIndices: [] }
   }
 
   const results: EmbeddingResult[] = []
+  const failedIndices: number[] = []
   let totalTokens = 0
 
-  // 배치 단위 처리
   for (let i = 0; i < texts.length; i += MAX_BATCH_SIZE) {
     const batch = texts.slice(i, i + MAX_BATCH_SIZE)
     const batchNumber = Math.floor(i / MAX_BATCH_SIZE) + 1
@@ -99,74 +126,52 @@ export async function createBatchEmbeddings(
 
     console.log(`[Embedding] 배치 ${batchNumber}/${totalBatches} 처리 중... (${batch.length}개)`)
 
-    try {
-      // 빈 텍스트 필터링
-      const validInputs = batch.map((text, idx) => ({
-        text: text?.trim() || ' ',
-        originalIndex: i + idx
-      })).filter(item => item.text.length > 0)
+    const validInputs = batch
+      .map((text, idx) => ({ text: text?.trim() || ' ', originalIndex: i + idx }))
+      .filter(item => item.text.length > 0)
 
-      if (validInputs.length === 0) {
-        // 빈 텍스트만 있는 경우 제로 벡터 추가
-        for (let j = 0; j < batch.length; j++) {
-          results.push({
-            embedding: new Array(EMBEDDING_DIMENSION).fill(0),
-            index: i + j,
-            tokensUsed: 0
-          })
-        }
-        continue
+    if (validInputs.length === 0) {
+      for (let j = 0; j < batch.length; j++) {
+        results.push({ embedding: new Array(EMBEDDING_DIMENSION).fill(0), index: i + j, tokensUsed: 0 })
       }
+      onProgress?.(Math.min(i + MAX_BATCH_SIZE, texts.length), texts.length)
+      continue
+    }
 
-      const response = await openai.embeddings.create({
-        model: EMBEDDING_MODEL,
-        input: validInputs.map(item => item.text),
-        encoding_format: 'float',
-      })
+    try {
+      const { data: embeddings, totalTokens: batchTokens } = await createEmbeddingWithRetry(validInputs.map(item => item.text))
 
-      const embeddings = response.data
+      const validIndices = new Set(validInputs.map(item => item.originalIndex))
 
-      // 결과 매핑
-      const batchTokens = response.usage?.total_tokens || 0
       for (let j = 0; j < embeddings.length; j++) {
-        const originalIndex = validInputs[j].originalIndex
         results.push({
-          embedding: embeddings[j].embedding,
-          index: originalIndex,
-          tokensUsed: Math.floor(batchTokens / embeddings.length) // 균등 분배
+          embedding: embeddings[j],
+          index: validInputs[j].originalIndex,
+          tokensUsed: Math.floor(batchTokens / Math.max(embeddings.length, 1)),
         })
       }
       totalTokens += batchTokens
 
-      // 빈 텍스트였던 인덱스에 제로 벡터 채우기
-      const validIndices = new Set(validInputs.map(item => item.originalIndex))
       for (let j = 0; j < batch.length; j++) {
         if (!validIndices.has(i + j)) {
-          results.push({
-            embedding: new Array(EMBEDDING_DIMENSION).fill(0),
-            index: i + j,
-            tokensUsed: 0
-          })
+          results.push({ embedding: new Array(EMBEDDING_DIMENSION).fill(0), index: i + j, tokensUsed: 0 })
         }
       }
-
     } catch (error) {
-      console.error(`[Embedding] 배치 ${batchNumber} 실패:`, error)
-      throw new Error(`임베딩 생성 실패 (배치 ${batchNumber}): ${error instanceof Error ? error.message : 'Unknown error'}`)
+      console.error(`[Embedding] 배치 ${batchNumber}/${totalBatches} 실패 (건너��):`, error)
+      for (let j = 0; j < batch.length; j++) {
+        failedIndices.push(i + j)
+      }
     }
 
     onProgress?.(Math.min(i + MAX_BATCH_SIZE, texts.length), texts.length)
   }
 
-  // 인덱스 순서대로 정렬
   results.sort((a, b) => a.index - b.index)
 
-  return { embeddings: results, totalTokens }
+  return { embeddings: results, totalTokens, failedIndices }
 }
 
-/**
- * 임베딩 차원 검증
- */
 export function validateEmbedding(embedding: number[]): boolean {
   return (
     Array.isArray(embedding) &&
@@ -175,12 +180,9 @@ export function validateEmbedding(embedding: number[]): boolean {
   )
 }
 
-/**
- * 코사인 유사도 계산 (클라이언트 사이드 검증용)
- */
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length) {
-    throw new Error('벡터 차원이 일치하지 않습니다')
+    throw new Error('��터 차원이 일치하지 않습니다')
   }
 
   let dotProduct = 0
