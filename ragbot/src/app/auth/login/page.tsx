@@ -14,26 +14,38 @@ function LoginForm() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    console.log('[Login] handleSubmit called')
     setError('')
     setLoading(true)
 
+    // FormData로 폼 값 직접 읽기 (React state 동기화 이슈 방지)
+    const formData = new FormData(e.currentTarget)
+    const email = formData.get('email') as string
+    const password = formData.get('password') as string
+
+    console.log('[Login] form values', { email })
+
     const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({
+    const { error, data } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
 
+    console.log('[Login] signInWithPassword result', { error, user: data.user?.id })
+
     setLoading(false)
 
     if (error) {
+      console.log('[Login] error:', error.message)
       setError(error.message)
       return
     }
 
-    router.push(redirectTo)
-    router.refresh()
+    console.log('[Login] success, redirecting to:', redirectTo)
+    // window.location.href 직접 실행 (setTimeout 제거)
+    window.location.href = redirectTo
   }
 
   return (
@@ -96,15 +108,6 @@ function LoginForm() {
               {loading ? '로그인 중...' : '로그인'}
             </button>
           </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-gray-600 dark:text-gray-400 text-sm">
-              계정이 없으신가요?{' '}
-              <a href="/auth/signup" className="text-blue-600 dark:text-blue-400 hover:underline font-medium">
-                회원가입
-              </a>
-            </p>
-          </div>
         </div>
       </div>
     </div>
