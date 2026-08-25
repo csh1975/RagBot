@@ -1,0 +1,8 @@
+# 툴/세션 아티팩트
+.omo/
+.playwright-mcp/
+.superpowers/
+dev-server.log
+
+# 사내 민감 문서 (GitHub 업로드 금지)
+/doc/
